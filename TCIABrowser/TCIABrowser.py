@@ -144,42 +144,12 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
       self.browserWidget.setGeometry(self.popupGeometry)
 
     #
-    # Login Area
-    #
-    self.promptLabel = qt.QLabel("To browse collections, please log in first.")
-    self.usernameLabel = qt.QLabel("Username: ")
-    self.passwordLabel = qt.QLabel("Password: ")
-    self.usernameEdit = qt.QLineEdit("nbia_guest")
-    self.usernameEdit.setPlaceholderText("For public access, enter \"nbia_guest\".")
-    self.passwordEdit = qt.QLineEdit()
-    self.passwordEdit.setPlaceholderText("No password required for public access.")
-    self.passwordEdit.setEchoMode(qt.QLineEdit.Password)
-    self.loginButton = qt.QPushButton("Log In")
-    self.loginButton.toolTip = "Logging in to TCIA Server."
-    self.loginButton.enabled = True
-    self.nlstSwitch = qt.QCheckBox("NLST Database")
-    self.nlstSwitch.setCheckState(False)
-    self.nlstSwitch.setTristate(False)
-    browserLayout.addWidget(self.usernameLabel, 1, 1, 1, 1)
-    browserLayout.addWidget(self.usernameEdit, 1, 2, 1, 1)
-    browserLayout.addWidget(self.passwordLabel, 2, 1, 1, 1)
-    browserLayout.addWidget(self.passwordEdit, 2, 2, 1, 1)
-    browserLayout.addWidget(self.promptLabel, 0, 0, 1, 0)
-    browserLayout.addWidget(self.loginButton, 3, 1, 2, 1)
-    browserLayout.addWidget(self.nlstSwitch, 3, 2, 1, 1)
-    self.logoutButton = qt.QPushButton("Log Out")
-    self.logoutButton.toolTip = "Logging out of TCIA Browser."
-    self.logoutButton.hide()
-    browserLayout.addWidget(self.logoutButton, 1, 0, 2, 1)
-
-    #
     # Show Browser Button
     #
     self.showBrowserButton = qt.QPushButton("Show Browser")
     # self.showBrowserButton.toolTip = "."
-    self.showBrowserButton.enabled = False
-    self.showBrowserButton.hide()
-    browserLayout.addWidget(self.showBrowserButton, 1, 2, 2, 1)
+    self.showBrowserButton.enabled = True
+    browserLayout.addWidget(self.showBrowserButton, 0, 0, 1, 3)
 
     # Browser Widget Layout within the collapsible button
     browserWidgetLayout = qt.QVBoxLayout(self.browserWidget)
@@ -448,8 +418,6 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     self.patientsTableWidget.connect('itemSelectionChanged()', self.patientsTableSelectionChanged)
     self.studiesTableWidget.connect('itemSelectionChanged()', self.studiesTableSelectionChanged)
     self.seriesTableWidget.connect('itemSelectionChanged()', self.seriesSelected)
-    self.loginButton.connect('clicked(bool)', self.AccountSelected)
-    self.logoutButton.connect('clicked(bool)', self.onLogoutButton)
     self.useCacheCeckBox.connect('stateChanged(int)', self.onUseCacheStateChanged)
     self.indexButton.connect('clicked(bool)', self.onIndexButton)
     self.loadButton.connect('clicked(bool)', self.onLoadButton)
@@ -476,57 +444,9 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     """Called when the application closes and the module widget is destroyed."""
     pass
 
-  def AccountSelected(self):
-    # print(self.closeEvent())
-    if self.nlstSwitch.isChecked():
-        self.usernameEdit.setText("nbia_guest")
-        self.passwordEdit.setText("")
-    elif self.usernameEdit.text.strip() != 'nbia_guest' and self.passwordEdit.text.strip() == '':
-        message = "Please enter username and password."
-        slicer.util.errorDisplay(message, windowTitle="TCIA Browser")
-        return None
-    self.getCollectionValues()
-
-  def onLogoutButton(self):
-    if self.loginButton.isVisible():
-        self.settings.setValue("loginStatus", True)
-        if hasattr(self.TCIAClient, "exp_time"):
-            message = "You have logged in. Your token will expire at " + str(self.TCIAClient.exp_time)
-        else: message = "You have logged in."
-        self.promptLabel.setText(message)
-        self.usernameLabel.hide()
-        self.usernameEdit.hide()
-        self.passwordLabel.hide()
-        self.passwordEdit.hide()
-        self.loginButton.hide()
-        self.nlstSwitch.hide()
-        self.logoutButton.show()
-        self.showBrowserButton.show()
-        self.showBrowserButton.enabled = True
-    else:
-        self.collectionDescriptions = []
-        # if self.usernameEdit.text.strip() != "nbia_guest":
-        #         self.TCIAClient.logOut()
-        del(self.TCIAClient)
-        self.settings.setValue("loginStatus", False)
-        self.browserWidget.close()
-        self.promptLabel.setText("To browse collections, please log in first")
-        self.usernameEdit.setText("")
-        self.usernameLabel.show()
-        self.usernameEdit.show()
-        self.passwordEdit.setText("")
-        self.passwordLabel.show()
-        self.passwordEdit.show()
-        self.loginButton.enabled = True
-        self.loginButton.setText("Log In")
-        self.loginButton.show()
-        self.nlstSwitch.show()
-        self.logoutButton.hide()
-        self.showBrowserButton.hide()
-        self.showBrowserButton.enabled = False
-        self.settings.setValue("browserWidgetGeometry", "")
-
   def onShowBrowserButton(self):
+    if not self.initialConnection:
+      self.getCollectionValues()
     self.showBrowser()
 
   def onUseCacheStateChanged(self, state):
@@ -585,28 +505,17 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
   def getCollectionValues(self):
     self.initialConnection = True
     # Instantiate TCIAClient object
-    self.loginButton.enabled = False
-    self.loginButton.setText("Logging In")
-    self.TCIAClient = TCIAClient.TCIAClient(self.usernameEdit.text.strip(), self.passwordEdit.text.strip(), self.nlstSwitch.isChecked())
+    nlst = self.collectionSelector.currentText == "NLST"
+    self.TCIAClient = TCIAClient.TCIAClient(nlst=nlst)
     self.showStatus("Getting Available Collections")
-    if hasattr(self.TCIAClient, "credentialError"):
-        slicer.util.errorDisplay(self.TCIAClient.credentialError, windowTitle="TCIA Browser")
-        self.loginButton.setText("Log In")
-        self.loginButton.enabled = True
-        self.clearStatus()
-        return None
     try:
-      self.showBrowser()
       response = self.TCIAClient.get_collection_values()
       self.populateCollectionsTreeView(response)
       self.clearStatus()
     except Exception as error:
-      self.loginButton.setText("Log In")
-      self.loginButton.enabled = True
       self.clearStatus()
       message = "getCollectionValues: Error in getting response from TCIA server.\nHTTP Error:\n" + str(error)
       slicer.util.errorDisplay(message, windowTitle="TCIA Browser")
-    self.onLogoutButton()
 
   def onStudiesSelectAllButton(self):
     self.studiesTableWidget.selectAll()
@@ -633,8 +542,12 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     self.progressMessage = "Getting available patients for collection: " + self.selectedCollection
     self.showStatus(self.progressMessage)
 
+    # Instantiate TCIAClient object
+    nlst = self.collectionSelector.currentText == "NLST"
+    self.TCIAClient = TCIAClient.TCIAClient(nlst=nlst)
+
     # Check if there is a cache for collection descriptions
-    collectionCache = f"{self.cachePath}NLSTDescription.json" if self.nlstSwitch.isChecked() else f"{self.cachePath}CollectionDescriptions.json"
+    collectionCache = f"{self.cachePath}NLSTDescription.json" if nlst else f"{self.cachePath}CollectionDescriptions.json"
     # If there is cache, use the cache
     if os.path.isfile(collectionCache):
       f = codecs.open(collectionCache, 'rb', encoding='utf8')
@@ -1102,6 +1015,8 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     collectionNames = []
     for collection in collections:
       collectionNames.append(collection['Collection'])
+    if "NLST" not in collectionNames:
+        collectionNames.append("NLST")
     collectionNames.sort()
 
     for name in collectionNames:

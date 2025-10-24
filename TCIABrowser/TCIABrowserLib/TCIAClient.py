@@ -7,18 +7,9 @@ except:
 import tcia_utils.nbia
 
 class TCIAClient:
-    def __init__(self, user = "nbia_guest", pw = "", nlst = False):
+    def __init__(self, nlst = False):
         if nlst: self.apiUrl = "nlst"
         else: self.apiUrl = ""
-        # create a token
-        try:
-            tcia_utils.nbia.getToken(user, pw, api_url = self.apiUrl)
-            if self.apiUrl == "nlst":
-                self.exp_time = tcia_utils.nbia.nlst_token_exp_time
-            else:
-                self.exp_time = tcia_utils.nbia.token_exp_time
-        except:
-            self.credentialError = "Please check your credential and try again.\nFor more information, check the Python console."
 
     def get_collection_values(self):
         return tcia_utils.nbia.getCollections(api_url = self.apiUrl)
@@ -50,9 +41,6 @@ class TCIAClient:
 
     def get_seg_ref_series(self, seriesInstanceUid):
         refSeries = tcia_utils.nbia.getSegRefSeries(seriesInstanceUid)
-        metadata = tcia_utils.nbia.getSeriesMetadata(refSeries, api_url = self.apiUrl)[0]
-        fileSize = round(int(metadata["File Size"])/1048576, 2)
-        return metadata["Series UID"], 0.01 if fileSize <= 0.01 else fileSize
-
-    def logOut(self):
-        tcia_utils.nbia.getToken(user="nbia_guest")
+        metadata = tcia_utils.nbia.getSeriesList([refSeries], api_url = self.apiUrl).iloc[0]
+        fileSize = round(int(metadata["FileSize"])/1048576, 2)
+        return metadata["SeriesInstanceUID"], 0.01 if fileSize <= 0.01 else fileSize

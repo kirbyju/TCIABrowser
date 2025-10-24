@@ -1,30 +1,28 @@
-import slicer, os
+import slicer, json, string, csv, urllib.request, urllib.parse, urllib.error
 
 try:
     slicer.util.pip_install('tcia_utils -U -q')
+    slicer.util.pip_install('pandas')
 except:
     slicer.util.pip_install('tcia_utils')
+    slicer.util.pip_install('pandas')
 import tcia_utils.nbia
+import pandas as pd
 
+#import TCIABrowserLib
+
+#
+# Refer https://wiki.cancerimagingarchive.net/display/Public/TCIA+Programmatic+Interface+REST+API+Guides for the API guide
+#
 class TCIAClient:
-    def __init__(self, user = "nbia_guest", pw = "", nlst = False):
-        if nlst: self.apiUrl = "nlst"
-        else: self.apiUrl = ""
-        # create a token
-        try:
-            tcia_utils.nbia.getToken(user, pw, api_url = self.apiUrl)
-            if self.apiUrl == "nlst":
-                self.exp_time = tcia_utils.nbia.nlst_token_exp_time
-            else:
-                self.exp_time = tcia_utils.nbia.token_exp_time
-        except:
-            self.credentialError = "Please check your credential and try again.\nFor more information, check the Python console."
+    def __init__(self, apiUrl = ""):
+        self.apiUrl = apiUrl
 
     def get_collection_values(self):
         return tcia_utils.nbia.getCollections(api_url = self.apiUrl)
 
     def get_collection_descriptions(self):
-        return tcia_utils.nbia.getCollectionDescriptions(api_url = self.apiUrl)
+        return tcia_utils.nbia.getCollectionDescriptions(self.apiUrl)
 
     def get_patient(self, collection = None):
         return tcia_utils.nbia.getPatient(collection, api_url = self.apiUrl)
@@ -37,22 +35,16 @@ class TCIAClient:
         return tcia_utils.nbia.getSeries(collection, patientId, studyInstanceUID, seriesInstanceUID, modality,
                                          bodyPartExamined, manufacturer, manufacturerModel, api_url = self.apiUrl)
 
-    def get_image(self, seriesInstanceUid, path):
-        try:
-            tcia_utils.nbia.downloadSeries([seriesInstanceUid], path=path, input_type="list", as_zip=True, api_url = self.apiUrl)
-            # Rename the file to match TCIABrowser.py expectations
-            old_file_path = os.path.join(path, f"{seriesInstanceUid}.zip")
-            new_file_path = os.path.join(path, "images.zip")
-            os.rename(old_file_path, new_file_path)
-
-        except Exception as e:
-            raise RuntimeError(f"Error downloading series {seriesInstanceUid}: {e}")
+    def get_image(self, seriesInstanceUids, path):
+        return tcia_utils.nbia.downloadSeries(seriesInstanceUids, input_type = 'list', api_url = self.apiUrl, path = path, as_zip = False)
 
     def get_seg_ref_series(self, seriesInstanceUid):
-        refSeries = tcia_utils.nbia.getSegRefSeries(seriesInstanceUid)
-        metadata = tcia_utils.nbia.getSeriesMetadata(refSeries, api_url = self.apiUrl)[0]
-        fileSize = round(int(metadata["File Size"])/1048576, 2)
-        return metadata["Series UID"], 0.01 if fileSize <= 0.01 else fileSize
-
-    def logOut(self):
-        tcia_utils.nbia.getToken(user="nbia_guest")
+        refSeries = tcia_utils.nbia.getSegRefSeries(seriesInstanceUid, api_url = self.apiUrl)
+        if not refSeries:
+            return None, None
+        response = tcia_utils.nbia.getSeriesList([refSeries], api_url = self.apiUrl)
+        if response.empty:
+            return None, None
+        metadata = response.iloc[0]
+        fileSize = round(int(metadata["FileSize"])/1048576, 2)
+        return metadata["SeriesInstanceUID"], 0.01 if fileSize <= 0.01 else fileSize

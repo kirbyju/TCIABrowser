@@ -18,7 +18,6 @@ import pydicom
 import os
 import sys
 import urllib
-import traceback
 from itertools import chain
 from __main__ import vtk, qt, ctk, slicer
 from TCIABrowserLib import TCIAClient
@@ -142,44 +141,6 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
       self.popupGeometry.setHeight(height)
       self.popupPositioned = False
       self.browserWidget.setGeometry(self.popupGeometry)
-
-    #
-    # Login Area
-    #
-    self.promptLabel = qt.QLabel("To browse collections, please log in first.")
-    self.usernameLabel = qt.QLabel("Username: ")
-    self.passwordLabel = qt.QLabel("Password: ")
-    self.usernameEdit = qt.QLineEdit("nbia_guest")
-    self.usernameEdit.setPlaceholderText("For public access, enter \"nbia_guest\".")
-    self.passwordEdit = qt.QLineEdit()
-    self.passwordEdit.setPlaceholderText("No password required for public access.")
-    self.passwordEdit.setEchoMode(qt.QLineEdit.Password)
-    self.loginButton = qt.QPushButton("Log In")
-    self.loginButton.toolTip = "Logging in to TCIA Server."
-    self.loginButton.enabled = True
-    self.nlstSwitch = qt.QCheckBox("NLST Database")
-    self.nlstSwitch.setCheckState(False)
-    self.nlstSwitch.setTristate(False)
-    browserLayout.addWidget(self.usernameLabel, 1, 1, 1, 1)
-    browserLayout.addWidget(self.usernameEdit, 1, 2, 1, 1)
-    browserLayout.addWidget(self.passwordLabel, 2, 1, 1, 1)
-    browserLayout.addWidget(self.passwordEdit, 2, 2, 1, 1)
-    browserLayout.addWidget(self.promptLabel, 0, 0, 1, 0)
-    browserLayout.addWidget(self.loginButton, 3, 1, 2, 1)
-    browserLayout.addWidget(self.nlstSwitch, 3, 2, 1, 1)
-    self.logoutButton = qt.QPushButton("Log Out")
-    self.logoutButton.toolTip = "Logging out of TCIA Browser."
-    self.logoutButton.hide()
-    browserLayout.addWidget(self.logoutButton, 1, 0, 2, 1)
-
-    #
-    # Show Browser Button
-    #
-    self.showBrowserButton = qt.QPushButton("Show Browser")
-    # self.showBrowserButton.toolTip = "."
-    self.showBrowserButton.enabled = False
-    self.showBrowserButton.hide()
-    browserLayout.addWidget(self.showBrowserButton, 1, 2, 2, 1)
 
     # Browser Widget Layout within the collapsible button
     browserWidgetLayout = qt.QVBoxLayout(self.browserWidget)
@@ -465,6 +426,8 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     # Add vertical spacer
     self.layout.addStretch(1)
 
+    self.getCollectionValues()
+
 
   # def tableWidgetReorder(self, tableType):
     # pass
@@ -472,59 +435,6 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
   def cleanup(self):
     """Called when the application closes and the module widget is destroyed."""
     pass
-
-  def AccountSelected(self):
-    # print(self.closeEvent())
-    if self.nlstSwitch.isChecked():
-        self.usernameEdit.setText("nbia_guest")
-        self.passwordEdit.setText("")
-    elif self.usernameEdit.text.strip() != 'nbia_guest' and self.passwordEdit.text.strip() == '':
-        message = "Please enter username and password."
-        slicer.util.errorDisplay(message, windowTitle="TCIA Browser")
-        return None
-    self.getCollectionValues()
-
-  def onLogoutButton(self):
-    if self.loginButton.isVisible():
-        self.settings.setValue("loginStatus", True)
-        if hasattr(self.TCIAClient, "exp_time"):
-            message = "You have logged in. Your token will expire at " + str(self.TCIAClient.exp_time)
-        else: message = "You have logged in."
-        self.promptLabel.setText(message)
-        self.usernameLabel.hide()
-        self.usernameEdit.hide()
-        self.passwordLabel.hide()
-        self.passwordEdit.hide()
-        self.loginButton.hide()
-        self.nlstSwitch.hide()
-        self.logoutButton.show()
-        self.showBrowserButton.show()
-        self.showBrowserButton.enabled = True
-    else:
-        self.collectionDescriptions = []
-        # if self.usernameEdit.text.strip() != "nbia_guest":
-        #         self.TCIAClient.logOut()
-        del(self.TCIAClient)
-        self.settings.setValue("loginStatus", False)
-        self.browserWidget.close()
-        self.promptLabel.setText("To browse collections, please log in first")
-        self.usernameEdit.setText("")
-        self.usernameLabel.show()
-        self.usernameEdit.show()
-        self.passwordEdit.setText("")
-        self.passwordLabel.show()
-        self.passwordEdit.show()
-        self.loginButton.enabled = True
-        self.loginButton.setText("Log In")
-        self.loginButton.show()
-        self.nlstSwitch.show()
-        self.logoutButton.hide()
-        self.showBrowserButton.hide()
-        self.showBrowserButton.enabled = False
-        self.settings.setValue("browserWidgetGeometry", "")
-
-  def onShowBrowserButton(self):
-    self.showBrowser()
 
   def onUseCacheStateChanged(self, state):
     if state == 0:
@@ -584,12 +494,6 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     # Instantiate TCIAClient object
     self.TCIAClient = TCIAClient.TCIAClient()
     self.showStatus("Getting Available Collections")
-    if hasattr(self.TCIAClient, "credentialError"):
-        slicer.util.errorDisplay(self.TCIAClient.credentialError, windowTitle="TCIA Browser")
-        self.loginButton.setText("Log In")
-        self.loginButton.enabled = True
-        self.clearStatus()
-        return None
     try:
       self.showBrowser()
       response = self.TCIAClient.get_collection_values()
@@ -808,7 +712,7 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     downloadQueue = {}
     seriesRowNumber = {}
 
-  def addFilesToDatabase(self, seriesUID):
+  def addFilesToDatabase(self, directory):
     self.progressMessage = "Adding Files to DICOM Database "
     self.showStatus(self.progressMessage)
     dicomWidget = slicer.modules.dicom.widgetRepresentation().self()
@@ -816,8 +720,8 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     indexer = ctk.ctkDICOMIndexer()
     # DICOM indexer uses the current DICOM database folder as the basis for relative paths,
     # therefore we must convert the folder path to absolute to ensure this code works
-    # even when a relative path is used as self.extractedFilesDirectory.
-    indexer.addDirectory(slicer.dicomDatabase, os.path.abspath(self.extractedFilesDirectory))
+    # even when a relative path is used as directory.
+    indexer.addDirectory(slicer.dicomDatabase, os.path.abspath(directory))
     indexer.waitForImportFinished()
     self.clearStatus()
 
@@ -840,8 +744,8 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
       if not any(selectedSeries == s for s in self.previouslyDownloadedSeries):
       # check if selected is an RTSTRUCT or SEG file
         if self.seriesTableWidget.item(row, 6).text() in ["RTSTRUCT", "SEG"]:
-          try:
-            refSeries, refSeriesSize = self.TCIAClient.get_seg_ref_series(seriesInstanceUid = selectedSeries)
+          refSeries, refSeriesSize = self.TCIAClient.get_seg_ref_series(seriesInstanceUid = selectedSeries)
+          if refSeries:
             # check if the reference series is also selected or is already downloaded
             if not self.seriesTableWidget.findItems(refSeries, qt.Qt.MatchExactly)[0].isSelected() and not any(refSeries == r for r in self.previouslyDownloadedSeries) and refSeries not in refSeriesList:
               message = f"Your selection {selectedSeries} is an RTSTRUCT or SEG file and it seems you have not either downloaded the reference series {refSeries}. Do you wish to download it as well?"
@@ -856,8 +760,6 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
                   refRow = self.seriesTableWidget.row(self.seriesTableWidget.findItems(refSeries, qt.Qt.MatchExactly)[0])
                   self.selectedSeriesNicknamesDic[refSeries] = str(refRow + 1)
                   self.seriesRowNumber[refSeries] = refRow
-          except Exception:
-            pass
       downloadFolderPath = os.path.join(self.storagePath, selectedSeries) + os.sep
       self.downloadQueue[selectedSeries] = [downloadFolderPath, self.seriesTableWidget.item(row, 9).text()]
       self.seriesRowNumber[selectedSeries] = row
@@ -869,12 +771,12 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     # Warn users of the download size and series
     if not slicer.util.confirmYesNoDisplay(downloadWarning, windowTitle="TCIA Browser"):
         return None
-    self.downloadQueue = dict(reversed(self.downloadQueue.items()))
+
     self.seriesTableWidget.clearSelection()
     self.patientsTableWidget.enabled = False
     self.studiesTableWidget.enabled = False
     self.collectionSelector.enabled = False
-    self.downloadSelectedSeries()
+    self.downloadSeriesList(list(self.downloadQueue.keys()))
 
     if self.loadToScene:
       availablePlugins = list(slicer.modules.dicomPlugins)
@@ -904,83 +806,27 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
           volume = plugin.load(loadables[0])
       self.browserWidget.close()
 
-
-  def downloadSelectedSeries(self):
-      while self.downloadQueue and not self.cancelDownload:
-        self.cancelDownloadButton.enabled = True
-        selectedSeries, [downloadFolderPath, seriesSize] = self.downloadQueue.popitem()
-        seriesSize = 0.01 if seriesSize == "< 0.01" else float(seriesSize)
-
-        # Create the directory if it doesn't exist
-        if not os.path.exists(downloadFolderPath):
-          logging.debug("Creating directory to keep the downloads: " + downloadFolderPath)
-          os.makedirs(downloadFolderPath)
-
-        # Define the file name where the zip file will be saved
-        fileName = os.path.join(downloadFolderPath, 'images.zip')
-
-        self.extractedFilesDirectory = os.path.join(downloadFolderPath, 'images')
-        self.progressMessage = "Downloading Images for series InstanceUID: " + selectedSeries
-        self.showStatus(self.progressMessage)
-        logging.debug(self.progressMessage)
-
-        try:
-          logging.debug("Attempting to download " + selectedSeries + "to " + downloadFolderPath)
-          self.TCIAClient.get_image(seriesInstanceUid=selectedSeries, path=downloadFolderPath)
-          slicer.app.processEvents()
-
-          # Ensure the parent directory exists
-          if not os.path.exists(os.path.dirname(fileName)):
-            os.makedirs(os.path.dirname(fileName))
-
-          logging.debug(f"Downloaded file {fileName} from the TCIA server")
-          self.clearStatus()
-
-          self.progressMessage = "Extracting Images"
-          self.showStatus(self.progressMessage)
-          totalItems = self.unzip(fileName, self.extractedFilesDirectory)
-
-          if totalItems == 0:
-            message = f"Failed to retrieve images for series {selectedSeries}. Please report this message to the developers!"
-            slicer.util.errorDisplay(message, windowTitle="TCIA Browser")
-          else:
-            license_file_path = os.path.join(self.extractedFilesDirectory, 'LICENSE')
-            # Check if the LICENSE file exists and delete it
-            if os.path.exists(license_file_path):
-                os.remove(license_file_path)
-
-          self.clearStatus()
-
-          # Import the data into dicomAppWidget and open the dicom browser
-          self.addFilesToDatabase(selectedSeries)
-
-          # Update UI
-          self.previouslyDownloadedSeries = set([slicer.dicomDatabase.seriesForFile(x) for x in slicer.dicomDatabase.allFiles()])
-          n = self.seriesRowNumber[selectedSeries]
-          table = self.seriesTableWidget
-          item = table.item(n, 1)
-          item.setIcon(self.storedlIcon)
-
-          # Clean up: remove the downloaded zip file after extracting
-          os.remove(fileName)
-
-        except Exception as error:
-          logging.error("Failed to download images!")
-          self.removeDownloadProgressBar(selectedSeries)
-          self.downloadQueue.pop(selectedSeries, None)
-          self.clearStatus()
-          # Capture the traceback details
-          error_traceback = traceback.format_exc()
-
-          # Create the error message
-          message = f"downloadSelectedSeries Error:\n{error}\n\nTraceback:\n{error_traceback}"
-          slicer.util.errorDisplay(message, windowTitle="TCIA Browser")
-
-      # Re-enable buttons after the download is complete
-      self.cancelDownloadButton.enabled = False
-      self.collectionSelector.enabled = True
-      self.patientsTableWidget.enabled = True
-      self.studiesTableWidget.enabled = True
+  def downloadSeriesList(self, seriesUids):
+    self.cancelDownloadButton.enabled = True
+    try:
+      self.TCIAClient.get_image(seriesUids, self.storagePath)
+      slicer.app.processEvents()
+      for seriesUid in seriesUids:
+        self.extractedFilesDirectory = os.path.join(self.storagePath, seriesUid)
+        self.addFilesToDatabase(self.extractedFilesDirectory)
+        n = self.seriesRowNumber[seriesUid]
+        table = self.seriesTableWidget
+        item = table.item(n, 1)
+        item.setIcon(self.storedlIcon)
+        self.removeDownloadProgressBar(seriesUid)
+    except Exception as error:
+      self.clearStatus()
+      message = "downloadSeriesList: Error in getting response from TCIA server.\nHTTP Error:\n" + str(error)
+      slicer.util.errorDisplay(message, windowTitle="TCIA Browser")
+    self.cancelDownloadButton.enabled = False
+    self.collectionSelector.enabled = True
+    self.patientsTableWidget.enabled = True
+    self.studiesTableWidget.enabled = True
 
   def makeDownloadProgressBar(self, selectedSeries):
     # downloadProgressBar = qt.QProgressBar()
@@ -1004,91 +850,6 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     # self.downloadProgressLabels[selectedSeries].deleteLater()
     # del self.downloadProgressLabels[selectedSeries]
 
-  def stringBufferReadWrite(self, dstFile, response, bufferSize=819):
-    response = json.dumps(response).encode("utf-8")
-    self.downloadSize = 0
-    while 1:
-      #
-      # If DOWNLOAD FINISHED
-      #
-      buffer = response[self.downloadSize:self.downloadSize + bufferSize]
-      # buffer = response.read(bufferSize)[:]
-      slicer.app.processEvents()
-      if not buffer:
-        # Pop from the queue
-        break
-      #
-      # Otherwise, Write buffer chunk to file
-      #
-      slicer.app.processEvents()
-      dstFile.write(buffer)
-      #
-      # And update progress indicators
-      #
-      self.downloadSize += len(buffer)
-
-  # This part was adopted from XNATSlicer module
-  def __bufferReadWrite(self, dstFile, response, selectedSeries, seriesSize, bufferSize=8192):
-
-    # currentDownloadProgressBar = self.downloadProgressBars[selectedSeries]
-    # currentProgressLabel = self.downloadProgressLabels[selectedSeries]
-
-    # Define the buffer read loop
-    self.downloadSize = 0
-    while 1:
-      # If DOWNLOAD FINISHED
-      buffer = response.read(bufferSize)
-      slicer.app.processEvents()
-      if not buffer:
-        # Pop from the queue
-        # currentDownloadProgressBar.setMaximum(100)
-        # currentDownloadProgressBar.setValue(100)
-        # currentDownloadProgressBar.setVisible(False)
-        # currentProgressLabel.setVisible(False)
-        self.removeDownloadProgressBar(selectedSeries)
-        self.downloadQueue.pop(selectedSeries, None)
-        break
-      if self.cancelDownload:
-        return False
-
-      # Otherwise, Write buffer chunk to file
-      slicer.app.processEvents()
-      dstFile.write(buffer)
-      #
-      # And update progress indicators
-      #
-      self.downloadSize += len(buffer)
-      # currentDownloadProgressBar.setValue(self.downloadSize / seriesSize * 100)
-      # currentDownloadProgressBar.setMaximum(0)
-      # currentProgressLabel.text = self.selectedSeriesNicknamesDic[
-      #                 selectedSeries] + ' (' + str(int(self.downloadSize / 1024)
-      #                                ) + ' of ' + str(
-      #   int(seriesSize / 1024)) + " KB)"
-    # return self.downloadSize
-    return True
-
-  def unzip(self, sourceFilename, destinationDir):
-    totalItems = 0
-    with zipfile.ZipFile(sourceFilename) as zf:
-      for member in zf.infolist():
-        logging.debug("Found item %s in archive" % member.filename)
-        words = member.filename.split('/')
-        path = destinationDir
-        for word in words[:-1]:
-          drive, word = os.path.splitdrive(word)
-          head, word = os.path.split(word)
-          if word in (os.curdir, os.pardir, ''): continue
-          path = os.path.join(path, word)
-        logging.debug("Extracting %s" % words[-1])
-        zf.extract(member, path)
-        try:
-          dcm = pydicom.read_file(os.path.join(path,words[-1]))
-          totalItems = totalItems + 1
-        except:
-          pass
-    logging.debug("Total %i DICOM items extracted from image archive." % totalItems)
-    return totalItems
-
   def populateCollectionsTreeView(self, responseString):
     collections = responseString
     # populate collection selector
@@ -1100,8 +861,8 @@ class TCIABrowserWidget(ScriptedLoadableModuleWidget):
     collectionNames = []
     for collection in collections:
       collectionNames.append(collection['Collection'])
-    collectionNames.sort()
     collectionNames.append("NLST")
+    collectionNames.sort()
 
     for name in collectionNames:
       self.collectionSelector.addItem(name)
